@@ -1,0 +1,61 @@
+name: Build Fanoos APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '14742923'
+          packages: 'platforms;android-37.0 build-tools;37.0.0 platform-tools'
+
+      - name: Download latest PattNG libv2ray.aar
+        run: |
+          mkdir -p app/libs
+          AAR_URL=$(curl -sL https://api.github.com/repos/patterniha/AndroidLibXrayLite/releases/latest \
+            | grep -o 'https://[^"]*libv2ray\.aar' | head -n 1)
+          echo "Downloading: $AAR_URL"
+          curl -fL "$AAR_URL" -o app/libs/libv2ray.aar
+          ls -lh app/libs/libv2ray.aar
+
+      - name: Generate release signing keystore
+        run: |
+          keytool -genkey -v \
+            -keystore fanoos-release.jks \
+            -alias fanoos \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass fanoos1234 -keypass fanoos1234 \
+            -dname "CN=Fanoos, OU=VPN, O=Fanoos, L=Tehran, C=IR"
+
+      - name: Build arm64-v8a Release APK
+        run: |
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon \
+            -Pandroid.injected.signing.store.file=${{ github.workspace }}/fanoos-release.jks \
+            -Pandroid.injected.signing.store.password=fanoos1234 \
+            -Pandroid.injected.signing.key.alias=fanoos \
+            -Pandroid.injected.signing.key.password=fanoos1234
+
+      - name: Upload Fanoos arm64-v8a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fanoos-arm64-v8a-APK
+          path: app/build/outputs/apk/release/*.apk
