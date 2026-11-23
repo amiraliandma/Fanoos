@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">فانوس</string>
+    <string name="notification_action_stop">قطع اتصال</string>
+    <string name="notification_connected">متصل به %1$s</string>
+    <string name="notification_channel_vpn">اتصال فانوس</string>
+    <string name="notification_channel_test">تست پینگ</string>
+    <string name="title_real_ping_all_server">در حال تست پینگ سرورها...</string>
+    <string name="connection_running_task_left">باقی‌مانده: %1$s</string>
+    <string name="action_cancel">لغو</string>
+    <string name="toast_services_start">اتصال برقرار شد</string>
+    <string name="toast_services_stop">اتصال قطع شد</string>
+    <string name="toast_services_failure">اتصال ناموفق بود</string>
+    <string name="toast_require_file_permission">دسترسی لازم است</string>
+</resources>
