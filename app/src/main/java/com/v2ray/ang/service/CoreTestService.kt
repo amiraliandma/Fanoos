@@ -37,7 +37,7 @@ class CoreTestService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         NotificationCompat.Action.Builder(
-            0,
+            R.drawable.ic_stat_fanoos,
             getString(R.string.action_cancel),
             pendingIntent
         ).build()

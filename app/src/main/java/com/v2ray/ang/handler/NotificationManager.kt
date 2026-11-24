@@ -73,7 +73,7 @@ object NotificationManager {
             .setOnlyAlertOnce(true)
             .setContentIntent(contentPendingIntent)
             .addAction(
-                0,
+                R.drawable.ic_stat_fanoos,
                 service.getString(R.string.notification_action_stop),
                 stopV2RayPendingIntent
             )

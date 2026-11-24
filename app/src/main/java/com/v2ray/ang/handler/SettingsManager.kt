@@ -406,18 +406,32 @@ object SettingsManager {
     fun initAssets(context: Context, assets: AssetManager) {
         val extFolder = Utils.userAssetPath(context)
         try {
-            val geo = setOf(AppConfig.GEOSITE_DAT, AppConfig.GEOIP_DAT)
+            val folder = File(extFolder)
+            if (!folder.exists()) {
+                folder.mkdirs()
+            }
+            val geo = setOf(
+                AppConfig.GEOSITE_DAT,
+                AppConfig.GEOIP_DAT,
+                AppConfig.GEOIP_ONLY_CN_PRIVATE_DAT
+            )
             assets.list("")
                 ?.filter { it in geo }
-                ?.filter { name -> !File(extFolder, name).exists() }
                 ?.forEach { name ->
                     val target = File(extFolder, name)
-                    assets.open(name).use { input ->
-                        FileOutputStream(target).use { output ->
-                            input.copyTo(output)
+                    if (!target.exists() || target.length() == 0L) {
+                        val tmp = File(extFolder, "$name.tmp.${android.os.Process.myPid()}")
+                        assets.open(name).use { input ->
+                            FileOutputStream(tmp).use { output ->
+                                input.copyTo(output)
+                            }
                         }
+                        if (!tmp.renameTo(target)) {
+                            tmp.copyTo(target, overwrite = true)
+                            tmp.delete()
+                        }
+                        LogUtil.i(AppConfig.TAG, "Copied geo asset to ${target.absolutePath}")
                     }
-                    LogUtil.i(AppConfig.TAG, "Copied geo asset to ${target.absolutePath}")
                 }
         } catch (e: Exception) {
             LogUtil.e(ANG_PACKAGE, "asset copy failed", e)

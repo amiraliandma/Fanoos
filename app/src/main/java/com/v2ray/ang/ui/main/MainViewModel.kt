@@ -78,7 +78,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 AppConfig.MSG_STATE_START_FAILURE -> {
                     _uiState.update { it.copy(isConnected = false, isConnecting = false) }
-                    showStatus("اتصال برقرار نشد؛ سرور دیگری را امتحان کنید", isError = true)
+                    val detail = intent.getStringExtra("content")?.trim().orEmpty()
+                    val msg = if (detail.isNotEmpty()) {
+                        "اتصال برقرار نشد ($detail)"
+                    } else {
+                        "اتصال برقرار نشد؛ سرور دیگری را امتحان کنید"
+                    }
+                    showStatus(msg, isError = true)
                 }
 
                 AppConfig.MSG_MEASURE_CONFIG_NOTIFY -> {
