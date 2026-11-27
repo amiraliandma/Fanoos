@@ -31,6 +31,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -58,15 +59,24 @@ fun MainScreen(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // 1. Top-center: Big Connect / Disconnect button
+        // 1. Top-center: Big Connect / Disconnect button (with mascot when relevant)
         ConnectSection(
             isConnected = state.isConnected,
             isConnecting = state.isConnecting,
             selectedServerName = state.selectedServerName,
+            guideState = state.guideState,
             onConnectClick = onConnectClick,
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Mascot guide: tells the user what to do next
+        MascotGuideBubble(
+            guideState = state.guideState,
+            hasInternetError = state.hasInternetError,
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Status banner (if any)
         if (!state.statusMessage.isNullOrBlank()) {
@@ -189,6 +199,7 @@ private fun ConnectSection(
     isConnected: Boolean,
     isConnecting: Boolean,
     selectedServerName: String,
+    guideState: GuideState,
     onConnectClick: () -> Unit,
 ) {
     val buttonColor by animateColorAsState(
@@ -199,6 +210,10 @@ private fun ConnectSection(
         },
         label = "connectButtonColor",
     )
+
+    val showPeek = guideState == GuideState.STEP_3_READY_BEHIND_CONNECT && !isConnecting
+    val showSit = guideState == GuideState.CONNECTED_SITTING_NEXT_TO_BUTTON ||
+        guideState == GuideState.DISCONNECTED_SITTING_RECONNECT
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -211,51 +226,68 @@ private fun ConnectSection(
             color = FanoosColors.PrimaryDark,
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(if (showPeek) 4.dp else 16.dp))
 
         Box(
-            contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(164.dp)
-                .shadow(10.dp, CircleShape)
-                .background(buttonColor, CircleShape)
-                .clickable(onClick = onConnectClick),
+                .fillMaxWidth()
+                .height(if (showPeek) 228.dp else 164.dp),
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (isConnecting) {
-                    CircularProgressIndicator(
-                        color = Color.White,
-                        strokeWidth = 3.5.dp,
-                        modifier = Modifier.size(36.dp),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "در حال اتصال...",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                } else {
-                    Text(
-                        text = if (isConnected) "متصل" else "اتصال",
-                        color = Color.White,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = if (isConnected) "برای قطع ضربه بزنید" else "برای شروع ضربه بزنید",
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontSize = 13.sp,
-                    )
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .size(164.dp)
+                    .shadow(10.dp, CircleShape)
+                    .background(buttonColor, CircleShape)
+                    .clickable(onClick = onConnectClick),
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (isConnecting) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            strokeWidth = 3.5.dp,
+                            modifier = Modifier.size(36.dp),
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "در حال اتصال...",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    } else {
+                        Text(
+                            text = if (isConnected) "متصل" else "اتصال",
+                            color = Color.White,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (isConnected) "برای قطع ضربه بزنید" else "برای شروع ضربه بزنید",
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 13.sp,
+                        )
+                    }
                 }
+            }
+
+            // Mascot peeking over the top of the button, pointing down at it
+            if (showPeek) {
+                MascotPeek(modifier = Modifier.align(Alignment.TopCenter))
+            }
+
+            // Mascot sitting on the left of the button, pointing right at it
+            if (showSit) {
+                MascotSit(modifier = Modifier.align(AbsoluteAlignment.BottomLeft))
             }
         }
 
         if (selectedServerName.isNotBlank()) {
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "سرور انتخاب‌شده: $selectedServerName",
+                text = "سرور انتخابشده: $selectedServerName",
                 color = FanoosColors.TextSub,
                 fontSize = 16.sp,
                 maxLines = 1,

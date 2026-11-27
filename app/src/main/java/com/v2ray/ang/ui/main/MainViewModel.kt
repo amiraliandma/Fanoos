@@ -5,6 +5,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -38,6 +40,19 @@ data class ServerRow(
     val isSelected: Boolean,
 )
 
+/** Mascot guide steps shown on the main screen. */
+enum class GuideState {
+    STEP_1_UPDATE_SUB,
+    UPDATING_SUB,
+    UPDATE_FAILED_CHECK_INTERNET,
+    STEP_2_TEST_PING,
+    TESTING_PING,
+    STEP_3_READY_BEHIND_CONNECT,
+    PING_ALL_FAILED_RETRY,
+    CONNECTED_SITTING_NEXT_TO_BUTTON,
+    DISCONNECTED_SITTING_RECONNECT,
+}
+
 data class MainUiState(
     val isConnected: Boolean = false,
     val isConnecting: Boolean = false,
@@ -49,6 +64,8 @@ data class MainUiState(
     val pingProgressText: String? = null,
     val statusMessage: String? = null,
     val isStatusError: Boolean = false,
+    val guideState: GuideState = GuideState.STEP_1_UPDATE_SUB,
+    val hasInternetError: Boolean = false,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -59,13 +76,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var statusClearJob: Job? = null
     private var receiverRegistered = false
 
+    /** In-memory only: resets when the app process is restarted. */
+    private var hasConnectedInSession: Boolean = false
+
     private val messageReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
             val key = intent?.getIntExtra("key", 0) ?: return
             when (key) {
                 AppConfig.MSG_STATE_RUNNING,
                 AppConfig.MSG_STATE_START_SUCCESS -> {
-                    _uiState.update { it.copy(isConnected = true, isConnecting = false) }
+                    hasConnectedInSession = true
+                    _uiState.update {
+                        it.copy(
+                            isConnected = true,
+                            isConnecting = false,
+                            guideState = GuideState.CONNECTED_SITTING_NEXT_TO_BUTTON,
+                        )
+                    }
                     if (key == AppConfig.MSG_STATE_START_SUCCESS) {
                         showStatus("اتصال با موفقیت برقرار شد")
                     }
@@ -73,11 +100,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 AppConfig.MSG_STATE_NOT_RUNNING,
                 AppConfig.MSG_STATE_STOP_SUCCESS -> {
-                    _uiState.update { it.copy(isConnected = false, isConnecting = false) }
+                    _uiState.update {
+                        it.copy(
+                            isConnected = false,
+                            isConnecting = false,
+                            guideState = if (hasConnectedInSession) {
+                                GuideState.DISCONNECTED_SITTING_RECONNECT
+                            } else {
+                                it.guideState
+                            },
+                        )
+                    }
                 }
 
                 AppConfig.MSG_STATE_START_FAILURE -> {
-                    _uiState.update { it.copy(isConnected = false, isConnecting = false) }
+                    _uiState.update {
+                        it.copy(
+                            isConnected = false,
+                            isConnecting = false,
+                            guideState = if (hasConnectedInSession) {
+                                GuideState.DISCONNECTED_SITTING_RECONNECT
+                            } else {
+                                GuideState.STEP_3_READY_BEHIND_CONNECT
+                            },
+                        )
+                    }
                     val detail = intent.getStringExtra("content")?.trim().orEmpty()
                     val msg = if (detail.isNotEmpty()) {
                         "اتصال برقرار نشد ($detail)"
@@ -105,11 +152,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 AppConfig.MSG_MEASURE_CONFIG_FINISH -> {
                     _uiState.update { it.copy(isTestingPing = false, pingProgressText = null) }
                     reloadServers(autoPickFastest = !_uiState.value.isConnected)
-                    showStatus("تست پینگ کامل شد و سریع‌ترین سرورها بالا آمدند")
+                    val healthyCount = _uiState.value.servers.count { it.pingMs > 0L }
+                    if (!_uiState.value.isConnected) {
+                        if (healthyCount > 0) {
+                            _uiState.update { it.copy(guideState = GuideState.STEP_3_READY_BEHIND_CONNECT) }
+                            showStatus("تست پینگ کامل شد؛ بهترین سرور انتخاب شد")
+                        } else {
+                            _uiState.update { it.copy(guideState = GuideState.PING_ALL_FAILED_RETRY) }
+                            showStatus(
+                                "هیچ سروری پاسخ نداد؛ اینترنت را بررسی و دوباره تست کنید",
+                                isError = true
+                            )
+                        }
+                    } else {
+                        showStatus("تست پینگ کامل شد و سریعترین سرورها بالا آمدند")
+                    }
                 }
 
                 AppConfig.MSG_MEASURE_CONFIG_CANCEL -> {
-                    _uiState.update { it.copy(isTestingPing = false, pingProgressText = null) }
+                    _uiState.update {
+                        it.copy(
+                            isTestingPing = false,
+                            pingProgressText = null,
+                            guideState = if (it.guideState == GuideState.TESTING_PING) {
+                                GuideState.STEP_2_TEST_PING
+                            } else {
+                                it.guideState
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -120,10 +191,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         SettingsManager.ensureFanoosSubscription()
         reloadServers()
         syncServiceState()
-
-        if (_uiState.value.servers.isEmpty()) {
-            updateSubscription(silentStart = true)
-        }
     }
 
     private fun registerReceiver() {
@@ -145,8 +212,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ""
         ) { handled ->
             if (!handled) {
-                _uiState.update { it.copy(isConnected = false, isConnecting = false) }
+                _uiState.update {
+                    it.copy(
+                        isConnected = false,
+                        isConnecting = false,
+                        guideState = if (
+                            hasConnectedInSession &&
+                            it.guideState == GuideState.CONNECTED_SITTING_NEXT_TO_BUTTON
+                        ) {
+                            GuideState.DISCONNECTED_SITTING_RECONNECT
+                        } else {
+                            it.guideState
+                        },
+                    )
+                }
             }
+        }
+    }
+
+    private fun isInternetAvailable(): Boolean {
+        return try {
+            val cm = getApplication<Application>()
+                .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return true
+            val network = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(network) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } catch (_: Exception) {
+            true
         }
     }
 
@@ -231,7 +324,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopVpn() {
-        _uiState.update { it.copy(isConnecting = false) }
+        if (_uiState.value.isConnected) hasConnectedInSession = true
+        _uiState.update {
+            it.copy(
+                isConnecting = false,
+                guideState = if (hasConnectedInSession) {
+                    GuideState.DISCONNECTED_SITTING_RECONNECT
+                } else {
+                    it.guideState
+                },
+            )
+        }
         LauncherManager.stopService(getApplication())
         showStatus("اتصال قطع شد")
     }
@@ -239,7 +342,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateSubscription(silentStart: Boolean = false) {
         if (_uiState.value.isUpdatingSub) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isUpdatingSub = true) }
+            _uiState.update {
+                it.copy(
+                    isUpdatingSub = true,
+                    hasInternetError = false,
+                    guideState = if (!it.isConnected) GuideState.UPDATING_SUB else it.guideState,
+                )
+            }
             if (!silentStart) {
                 showStatus("در حال دریافت لیست جدید سرورها...")
             }
@@ -260,9 +369,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             reloadServers()
 
             if (result != null && result.configCount > 0) {
+                if (!_uiState.value.isConnected) {
+                    _uiState.update { it.copy(guideState = GuideState.STEP_2_TEST_PING) }
+                }
                 showStatus("${result.configCount} سرور با موفقیت بروزرسانی شد")
             } else {
-                showStatus("دریافت لیست ناموفق بود؛ اتصال اینترنت را بررسی کنید", isError = true)
+                val offline = !isInternetAvailable()
+                if (!_uiState.value.isConnected) {
+                    _uiState.update {
+                        it.copy(
+                            guideState = GuideState.UPDATE_FAILED_CHECK_INTERNET,
+                            hasInternetError = offline,
+                        )
+                    }
+                }
+                showStatus("اتصال اینترنت رو بررسی کن لطفاً", isError = true)
             }
         }
     }
@@ -274,19 +395,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ctx,
                 TestServiceMessage(key = AppConfig.MSG_MEASURE_CONFIG_CANCEL)
             )
-            _uiState.update { it.copy(isTestingPing = false, pingProgressText = null) }
+            _uiState.update {
+                it.copy(
+                    isTestingPing = false,
+                    pingProgressText = null,
+                    guideState = if (it.guideState == GuideState.TESTING_PING) {
+                        GuideState.STEP_2_TEST_PING
+                    } else {
+                        it.guideState
+                    },
+                )
+            }
             return
         }
 
         val guids = MmkvManager.decodeServerList(AppConfig.FANOOS_SUB_ID)
         if (guids.isEmpty()) {
+            if (!_uiState.value.isConnected) {
+                _uiState.update { it.copy(guideState = GuideState.STEP_1_UPDATE_SUB) }
+            }
             showStatus("لیست سرورها خالی است؛ ابتدا بروزرسانی کنید", isError = true)
             return
         }
 
         MmkvManager.clearAllTestDelayResults(guids)
         reloadServers()
-        _uiState.update { it.copy(isTestingPing = true, pingProgressText = null) }
+        _uiState.update {
+            it.copy(
+                isTestingPing = true,
+                pingProgressText = null,
+                guideState = if (!it.isConnected) GuideState.TESTING_PING else it.guideState,
+            )
+        }
 
         MessageHelper.sendMsg2TestService(
             ctx,
